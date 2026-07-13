@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.6 - 2026-07-13
+
+- Removed the fixed six-ComboBox/one-DropDownList assumption from session-template validation.
+- Accepted user-edited session and closing content-control counts while preserving every discovered control definition and list item.
+- Classified session paragraphs by their legal Arabic opening and valid time rather than by control count, so unrelated control-bearing paragraphs are ignored.
+- Added template filename, full path, paragraph number, table/cell location, visible text, and actual control counts to actionable validation failures.
+- Added paragraph locations and actual control counts to the signed preview manifest.
+- Preserved an already-present current session by its legal text when its controls came from an earlier template revision, preventing duplicate insertion after future template edits.
+- Added regression coverage for variable counts, nested controls inside table cells, non-session paragraphs, and detailed diagnostics.
+
 ## 1.2.5 - 2026-07-13
 
 - Made the verified responsive WinForms interface a first-class source file so clean builds no longer depend on a historical `dist` folder.

@@ -25,7 +25,7 @@ from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile, ZipInfo
 from lxml import etree
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -139,6 +139,8 @@ class WorkflowError(RuntimeError):
 @dataclass(frozen=True)
 class OpeningTemplate:
     order: int
+    paragraph_number: int
+    location: str
     minutes: int
     display_time: str
     text: str
@@ -154,6 +156,8 @@ class TemplateData:
     path: Path
     sha256: str
     openings: tuple[OpeningTemplate, ...]
+    closing_paragraph_number: int
+    closing_location: str
     closing_text: str
     closing_normalized_text: str
     closing_xml_hash: str
@@ -319,6 +323,85 @@ def body_paragraphs(
     if nonempty:
         return [paragraph for paragraph in paragraphs if paragraph_text(paragraph)]
     return paragraphs
+
+
+def paragraph_number(root: etree._Element, paragraph: etree._Element) -> int:
+    """Return the one-based main-body paragraph ordinal, including empty paragraphs."""
+
+    for index, candidate in enumerate(body_paragraphs(root), 1):
+        if candidate is paragraph or candidate == paragraph:
+            return index
+    raise WorkflowError("template paragraph is not part of the main document body")
+
+
+def paragraph_location(root: etree._Element, paragraph: etree._Element) -> str:
+    """Describe a paragraph's body/table position for actionable diagnostics."""
+
+    table = next(
+        (
+            ancestor
+            for ancestor in paragraph.iterancestors()
+            if etree.QName(ancestor).localname == "tbl"
+        ),
+        None,
+    )
+    if table is None:
+        return f"body/paragraph[{paragraph_number(root, paragraph)}]"
+
+    tables = list(root.xpath(".//w:body//w:tbl", namespaces=NS))
+    table_index = next(
+        (
+            index
+            for index, candidate in enumerate(tables, 1)
+            if candidate is table or candidate == table
+        ),
+        0,
+    )
+    row = next(
+        (
+            ancestor
+            for ancestor in paragraph.iterancestors()
+            if etree.QName(ancestor).localname == "tr"
+        ),
+        None,
+    )
+    cell = next(
+        (
+            ancestor
+            for ancestor in paragraph.iterancestors()
+            if etree.QName(ancestor).localname == "tc"
+        ),
+        None,
+    )
+    row_index = (
+        list(table.xpath("./w:tr", namespaces=NS)).index(row) + 1
+        if row is not None
+        else 0
+    )
+    cell_index = (
+        list(row.xpath("./w:tc", namespaces=NS)).index(cell) + 1
+        if row is not None and cell is not None
+        else 0
+    )
+    cell_paragraphs = (
+        list(cell.xpath(".//w:p", namespaces=NS)) if cell is not None else []
+    )
+    local_index = (
+        next(
+            (
+                index
+                for index, candidate in enumerate(cell_paragraphs, 1)
+                if candidate is paragraph or candidate == paragraph
+            ),
+            0,
+        )
+        if cell_paragraphs
+        else 0
+    )
+    return (
+        f"body/table[{table_index}]/row[{row_index}]/cell[{cell_index}]"
+        f"/paragraph[{local_index}]"
+    )
 
 
 def parse_time(value: str) -> tuple[int, str]:
@@ -656,6 +739,49 @@ def control_counter(node: etree._Element) -> Counter[str]:
     )
 
 
+def is_template_session_paragraph(paragraph: etree._Element) -> bool:
+    """Recognize sessions by their legal opening, never by control count alone."""
+
+    return normalize_text(paragraph_text(paragraph)).startswith(SESSION_NORM)
+
+
+def template_validation_error(
+    path: Path,
+    root: etree._Element,
+    paragraph: etree._Element | None,
+    issue: str,
+    *,
+    expected: str,
+) -> WorkflowError:
+    """Build a precise, copy-friendly template validation failure."""
+
+    if paragraph is None:
+        number: str | int = "not found"
+        location = "main document body"
+        text = "(no matching paragraph)"
+        counts: Counter[str] = Counter()
+    else:
+        number = paragraph_number(root, paragraph)
+        location = paragraph_location(root, paragraph)
+        text = paragraph_text(paragraph)
+        counts = control_counter(paragraph)
+    if len(text) > 320:
+        text = text[:317] + "..."
+    return WorkflowError(
+        "Template validation failed:\n"
+        f"File: {path.name}\n"
+        f"Path: {path.resolve()}\n"
+        f"Paragraph: {number}\n"
+        f"Location: {location}\n"
+        f"Text: {text}\n"
+        f"ComboBox found: {counts.get('comboBox', 0)}\n"
+        f"DropDownList found: {counts.get('dropDownList', 0)}\n"
+        f"All content controls: {dict(sorted(counts.items()))}\n"
+        f"Expected: {expected}\n"
+        f"Issue: {issue}"
+    )
+
+
 def contains_subsequence(
     sequence: Sequence[Any], needle: Sequence[Any]
 ) -> bool:
@@ -768,22 +894,39 @@ def load_template(path: Path) -> TemplateData:
     for paragraph in body_paragraphs(parts.document_root, nonempty=True):
         text = paragraph_text(paragraph)
         normalized = normalize_text(text)
-        if normalized.startswith(SESSION_NORM):
-            minutes, display_time = parse_time(text)
+        if is_template_session_paragraph(paragraph):
+            try:
+                minutes, display_time = parse_time(text)
+            except WorkflowError as exc:
+                raise template_validation_error(
+                    path,
+                    parts.document_root,
+                    paragraph,
+                    str(exc),
+                    expected=(
+                        "one valid 12-hour session time; ComboBox and "
+                        "DropDownList counts may vary"
+                    ),
+                ) from exc
             safe, reason = paragraph_is_safe_template(paragraph)
             if not safe:
-                raise WorkflowError(reason)
+                raise template_validation_error(
+                    path,
+                    parts.document_root,
+                    paragraph,
+                    reason,
+                    expected=(
+                        "a safe session paragraph; ComboBox and "
+                        "DropDownList counts may vary"
+                    ),
+                )
             signature = paragraph_control_signature(paragraph)
             counts = control_counter(paragraph)
-            if len(signature) != 7 or counts != Counter(
-                {"comboBox": 6, "dropDownList": 1}
-            ):
-                raise WorkflowError(
-                    "each template session paragraph must contain 6 ComboBox and 1 DropDownList controls"
-                )
             openings.append(
                 OpeningTemplate(
                     order=len(openings) + 1,
+                    paragraph_number=paragraph_number(parts.document_root, paragraph),
+                    location=paragraph_location(parts.document_root, paragraph),
                     minutes=minutes,
                     display_time=display_time,
                     text=text,
@@ -797,8 +940,15 @@ def load_template(path: Path) -> TemplateData:
         if normalized.startswith(NOTICE_NORM):
             closing_candidates.append(paragraph)
     if not openings:
-        raise WorkflowError(
-            "expected at least one ordered session paragraph in the template"
+        raise template_validation_error(
+            path,
+            parts.document_root,
+            None,
+            "no session paragraph was recognized",
+            expected=(
+                f"at least one paragraph beginning with {SESSION_PREFIX!r}; "
+                "control counts may vary"
+            ),
         )
     if len(closing_candidates) != 1:
         raise WorkflowError(
@@ -807,13 +957,18 @@ def load_template(path: Path) -> TemplateData:
     closing = closing_candidates[0]
     safe, reason = paragraph_is_safe_template(closing)
     if not safe:
-        raise WorkflowError(reason)
+        raise template_validation_error(
+            path,
+            parts.document_root,
+            closing,
+            reason,
+            expected=(
+                "a safe decision-notice paragraph; ComboBox and "
+                "DropDownList counts may vary"
+            ),
+        )
     closing_signature = paragraph_control_signature(closing)
     closing_counts = control_counter(closing)
-    if len(closing_signature) != 2 or closing_counts != Counter({"comboBox": 2}):
-        raise WorkflowError(
-            "template closing paragraph must contain exactly two ComboBox controls"
-        )
 
     body = closing.getparent()
     if body is None:
@@ -915,6 +1070,8 @@ def load_template(path: Path) -> TemplateData:
         path=path,
         sha256=sha256_file(path),
         openings=tuple(openings),
+        closing_paragraph_number=paragraph_number(parts.document_root, closing),
+        closing_location=paragraph_location(parts.document_root, closing),
         closing_text=paragraph_text(closing),
         closing_normalized_text=normalize_text(paragraph_text(closing)),
         closing_xml_hash=closing_semantic_xml_hash(closing),
@@ -1535,6 +1692,13 @@ def unresolved_token_count(root: etree._Element) -> int:
 def functional_opening_matches(
     paragraphs: Sequence[etree._Element], opening: OpeningTemplate
 ) -> tuple[int, int, list[int]]:
+    """Find the current session by legal text, independent of template revisions.
+
+    Existing minutes must remain idempotent when a user later adds, removes, or
+    changes a list control in the daily template. Newly inserted paragraphs are
+    still validated by their full semantic OOXML hash in validate_output().
+    """
+
     text_count = 0
     functional_count = 0
     locations: list[int] = []
@@ -1542,11 +1706,10 @@ def functional_opening_matches(
         normalized = normalize_text(paragraph_text(paragraph))
         if opening.normalized_text not in normalized:
             continue
-        text_count += normalized.count(opening.normalized_text)
-        controls = paragraph_control_signature(paragraph)
-        if contains_subsequence(controls, opening.control_signature):
-            functional_count += 1
-            locations.append(index + 1)
+        occurrences = normalized.count(opening.normalized_text)
+        text_count += occurrences
+        functional_count += occurrences
+        locations.append(index + 1)
     return text_count, functional_count, locations
 
 
@@ -1644,6 +1807,13 @@ def analyze_target(
     record["current_opening_text_count"] = text_matches
     record["current_opening_functional_count"] = functional_matches
     record["current_opening_locations"] = locations
+    record["current_opening_control_schema_count"] = sum(
+        contains_subsequence(
+            paragraph_control_signature(paragraphs[index - 1]),
+            opening.control_signature,
+        )
+        for index in locations
+    )
     record["current_opening_embedded"] = any(
         paragraph_text(paragraphs[index - 1]) != opening.text
         for index in locations
@@ -1654,12 +1824,15 @@ def analyze_target(
             "current session block is duplicated in source"
         )
         return record
-    if text_matches > functional_matches:
-        record["status"] = "blocked"
-        record["blocked_reasons"].append(
-            "current session text exists without its functional dropdown controls"
+    if (
+        text_matches == 1
+        and record["current_opening_control_schema_count"] == 0
+    ):
+        record["warnings"].append(
+            "current session text matches the selected template, but its "
+            "content-control definitions come from an earlier template "
+            "revision; the existing session is preserved without duplication"
         )
-        return record
     record["session_action"] = (
         "keep_current" if functional_matches == 1 else "insert_before_basis"
     )
@@ -1963,6 +2136,8 @@ def build_manifest(
             "openings": [
                 {
                     "folder_number": opening.order,
+                    "paragraph_number": opening.paragraph_number,
+                    "location": opening.location,
                     "time": opening.display_time,
                     "text": opening.text,
                     "xml_hash": opening.xml_hash,
@@ -1970,6 +2145,8 @@ def build_manifest(
                 }
                 for opening in template.openings
             ],
+            "closing_paragraph_number": template.closing_paragraph_number,
+            "closing_location": template.closing_location,
             "closing_text": template.closing_text,
             "closing_xml_hash": template.closing_xml_hash,
             "closing_control_counts": template.closing_control_counts,
@@ -2986,14 +3163,25 @@ def resolve_template(
         path = Path(template_argument)
         if not path.is_absolute():
             path = project_root / path
-        return path.resolve()
+        path = path.resolve()
+        if not path.is_file() or path.suffix.lower() != ".docx":
+            raise WorkflowError(f"template DOCX was not found: {path}")
+        return path
     preferred = project_root / "نموذج التعبئة للمحاضر.docx"
     if preferred.exists():
         return preferred.resolve()
-    root_docx = sorted(project_root.glob("*.docx"))
-    if len(root_docx) != 1:
-        raise WorkflowError("template is ambiguous; pass --template")
-    return root_docx[0].resolve()
+    candidates = sorted(project_root.glob("نموذج التعبئة للمحاضر*.docx"))
+    if len(candidates) == 1:
+        return candidates[0].resolve()
+    if not candidates:
+        raise WorkflowError(
+            "no filling template was found; expected a DOCX whose name begins "
+            "with 'نموذج التعبئة للمحاضر'"
+        )
+    raise WorkflowError(
+        "multiple filling templates were found; pass --template with one of: "
+        + ", ".join(path.name for path in candidates)
+    )
 
 
 def validate_preview_snapshot(

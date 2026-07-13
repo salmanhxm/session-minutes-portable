@@ -454,6 +454,7 @@ $script:PreviewManifest = Join-Path $script:OutputsRoot 'preview\preview.json'
 $script:PreviewReport = Join-Path $script:OutputsRoot 'preview\preview.md'
 $script:PreviewId = $null
 $script:BatchRoot = $null
+$script:TemplatePath = $null
 $script:CurrentProcess = $null
 $script:StdoutTask = $null
 $script:StderrTask = $null
@@ -613,6 +614,7 @@ function Test-Prerequisites {
 
     $missing = [System.Collections.Generic.List[string]]::new()
     $script:BatchRoot = $null
+    $script:TemplatePath = $null
     if (-not (Test-Path -LiteralPath $script:EnginePath -PathType Leaf)) {
         $missing.Add("محرك النسخة المحمولة:`r`n$($script:EnginePath)")
     }
@@ -654,8 +656,25 @@ function Test-Prerequisites {
             }
         }
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $script:ProjectRoot 'نموذج التعبئة للمحاضر.docx') -PathType Leaf)) {
-        $missing.Add("ملف نموذج التعبئة للمحاضر.docx")
+    $preferredTemplate = Join-Path $script:ProjectRoot 'نموذج التعبئة للمحاضر.docx'
+    $templateCandidates = @(
+        Get-ChildItem -LiteralPath $script:ProjectRoot -File -Filter 'نموذج التعبئة للمحاضر*.docx' -ErrorAction SilentlyContinue |
+            Sort-Object Name
+    )
+    if (Test-Path -LiteralPath $preferredTemplate -PathType Leaf) {
+        $script:TemplatePath = (Resolve-Path -LiteralPath $preferredTemplate).Path
+    }
+    elseif ($templateCandidates.Count -eq 1) {
+        $script:TemplatePath = $templateCandidates[0].FullName
+    }
+    elseif ($templateCandidates.Count -eq 0) {
+        $missing.Add("ملف DOCX يبدأ اسمه بـ نموذج التعبئة للمحاضر")
+    }
+    else {
+        $missing.Add(
+            "يوجد أكثر من نموذج تعبئة دون النموذج الافتراضي؛ احتفظ بنموذج واحد أو سمِّ النموذج المختار نموذج التعبئة للمحاضر.docx. الموجود: " +
+            (($templateCandidates | ForEach-Object Name) -join '، ')
+        )
     }
 
     if ($missing.Count -eq 0) {
@@ -1149,7 +1168,9 @@ function Start-EngineCommand {
     $engineArguments = @(
         $Mode,
         '--project-root',
-        $script:ProjectRoot
+        $script:ProjectRoot,
+        '--template',
+        $script:TemplatePath
     )
 
     if ($Mode -ne 'preview') {

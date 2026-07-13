@@ -219,6 +219,90 @@ class PortableSourceTests(unittest.TestCase):
             (expected,),
         )
 
+    def test_session_discovery_accepts_variable_nested_control_counts(self):
+        engine = load_engine()
+        root = engine.etree.fromstring(
+            f'''<w:document xmlns:w="{engine.W_NS}"><w:body><w:tbl><w:tr><w:tc>
+            <w:p><w:r><w:t>{engine.SESSION_PREFIX}، في تمام الساعة 3:00 مساءً.</w:t></w:r>
+              <w:sdt><w:sdtPr><w:comboBox/></w:sdtPr><w:sdtContent>
+                <w:sdt><w:sdtPr><w:dropDownList/></w:sdtPr><w:sdtContent><w:r><w:t>خيار</w:t></w:r></w:sdtContent></w:sdt>
+              </w:sdtContent></w:sdt>
+            </w:p></w:tc></w:tr></w:tbl></w:body></w:document>'''
+        )
+        paragraph = engine.body_paragraphs(root, nonempty=True)[0]
+
+        self.assertTrue(engine.is_template_session_paragraph(paragraph))
+        self.assertEqual(
+            engine.control_counter(paragraph),
+            engine.Counter({"comboBox": 1, "dropDownList": 1}),
+        )
+        self.assertEqual(engine.paragraph_number(root, paragraph), 1)
+        self.assertEqual(
+            engine.paragraph_location(root, paragraph),
+            "body/table[1]/row[1]/cell[1]/paragraph[1]",
+        )
+
+    def test_control_count_alone_never_classifies_a_session(self):
+        engine = load_engine()
+        controls = "".join(
+            f'''<w:sdt><w:sdtPr><w:comboBox/></w:sdtPr><w:sdtContent><w:r><w:t>{index}</w:t></w:r></w:sdtContent></w:sdt>'''
+            for index in range(7)
+        )
+        paragraph = engine.etree.fromstring(
+            f'''<w:p xmlns:w="{engine.W_NS}"><w:r><w:t>فقرة إدارية غير مخصصة للجلسة</w:t></w:r>{controls}</w:p>'''
+        )
+
+        self.assertEqual(engine.control_counter(paragraph)["comboBox"], 7)
+        self.assertFalse(engine.is_template_session_paragraph(paragraph))
+
+    def test_template_error_names_file_paragraph_text_and_actual_counts(self):
+        engine = load_engine()
+        root = engine.etree.fromstring(
+            f'''<w:document xmlns:w="{engine.W_NS}"><w:body><w:p>
+            <w:r><w:t>{engine.SESSION_PREFIX} دون وقت صالح</w:t></w:r>
+            <w:sdt><w:sdtPr><w:comboBox/></w:sdtPr><w:sdtContent><w:r><w:t>خيار</w:t></w:r></w:sdtContent></w:sdt>
+            </w:p></w:body></w:document>'''
+        )
+        paragraph = engine.body_paragraphs(root, nonempty=True)[0]
+
+        error = engine.template_validation_error(
+            Path("regional-template.docx"),
+            root,
+            paragraph,
+            "missing time",
+            expected="one valid time; control counts may vary",
+        )
+        message = str(error)
+
+        self.assertIn("File: regional-template.docx", message)
+        self.assertIn("Paragraph: 1", message)
+        self.assertIn("Text:", message)
+        self.assertIn("ComboBox found: 1", message)
+        self.assertIn("DropDownList found: 0", message)
+        self.assertIn("Issue: missing time", message)
+
+    def test_existing_session_remains_current_after_control_schema_edit(self):
+        engine = load_engine()
+        paragraph = engine.etree.fromstring(
+            f'''<w:p xmlns:w="{engine.W_NS}"><w:r><w:t>{engine.SESSION_PREFIX}، في تمام الساعة 3:00 مساءً.</w:t></w:r>
+            <w:sdt><w:sdtPr><w:comboBox/></w:sdtPr><w:sdtContent><w:r><w:t>قديم</w:t></w:r></w:sdtContent></w:sdt></w:p>'''
+        )
+        opening = SimpleNamespace(
+            normalized_text=engine.normalize_text(engine.paragraph_text(paragraph)),
+            control_signature=(
+                ("comboBox", (("قديم", "OLD"),)),
+                ("comboBox", (("مضاف حديثًا", "NEW"),)),
+            ),
+        )
+
+        text_count, current_count, locations = engine.functional_opening_matches(
+            [paragraph], opening
+        )
+
+        self.assertEqual(text_count, 1)
+        self.assertEqual(current_count, 1)
+        self.assertEqual(locations, [1])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

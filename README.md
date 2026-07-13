@@ -19,6 +19,10 @@ An Arabic RTL Windows 11 desktop application that creates review copies of Word 
 
 The project folder contains one numeric batch folder (for example `17`) with numbered subfolders (`1`, `2`, `3`, ...), plus the filling template in the project root. Template opening blocks map to numbered subfolders in document order.
 
+The default template name is `نموذج التعبئة للمحاضر.docx`. When that file is absent, the app also accepts one regional variant whose filename begins with `نموذج التعبئة للمحاضر`; if several variants are present, keep one or rename the chosen file to the default name.
+
+Session and closing content-control counts are discovered dynamically. Users may edit list items or add/remove controls without matching a hard-coded count; structural validation errors identify the template, paragraph, table/cell location, visible text, and actual control counts.
+
 ## Privacy and safety
 
 Processing is local. The application does not upload documents, overwrite source DOCX files, or require secrets. Real case files and generated outputs are intentionally excluded from this repository.
