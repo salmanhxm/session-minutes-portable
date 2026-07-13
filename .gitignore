@@ -1,0 +1,53 @@
+# Build and release outputs
+.build/
+dist/
+outputs/
+*.zip
+
+# Python caches, environments, tests, and coverage
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.venv/
+venv/
+env/
+
+# Local documents and runtime data (never publish legal case files)
+*.docx
+*.docm
+*.dotx
+*.dotm
+*.jsonl
+*.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.jks
+*.keystore
+*.snk
+*.pem
+*.key
+
+# Editors and operating-system metadata
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.DS_Store
+Thumbs.db
+Desktop.ini
