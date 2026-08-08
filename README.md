@@ -1,12 +1,12 @@
 <div dir="rtl" align="right">
 
 <p align="center">
-  <img src="assets/session_minutes_icon_source.png" width="120" alt="شعار محاضر الجلسات">
+  <img src="assets/session_minutes_legal_icon_source.png" width="120" alt="شعار تجهيز ملفات Word">
 </p>
 
-# محاضر الجلسات
+# تجهيز ملفات Word
 
-تطبيق محمول لنظام **Windows 11 x64** يساعد على تجهيز محاضر الجلسات من ملفات **Word**.
+تطبيق محمول لنظام **Windows 11 x64** يساعد على تجهيز ملفات **Word**.
 
 ## التنزيل
 
