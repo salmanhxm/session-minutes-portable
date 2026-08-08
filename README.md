@@ -1,36 +1,30 @@
-# Session Minutes Portable
+<div dir="rtl" align="right">
 
-An Arabic RTL Windows 11 desktop application that creates review copies of Word session minutes while preserving OOXML content controls and formatting. Source documents are never overwritten; generated files stay under the selected project's `outputs` folder.
+<p align="center">
+  <img src="assets/session_minutes_icon_source.png" width="120" alt="شعار محاضر الجلسات">
+</p>
 
-## Runtime requirements
+# محاضر الجلسات
 
-- Windows 11 x64
-- Microsoft Word for visual and human review
-- No Python installation, administrator rights, cloud account, or internet connection at runtime
+تطبيق محمول لنظام **Windows 11 x64** يساعد على تجهيز محاضر الجلسات من ملفات **Word**.
 
-## Workflow
+## التنزيل
 
-1. Extract the complete release archive.
-2. Run `SessionMinutesPortable.exe` and select the project folder.
-3. Run Preview and inspect the report.
-4. Optionally create a pilot set.
-5. Create final copies only after validating the preview.
-6. Review every generated DOCX in Word.
+[تحميل أحدث إصدار](https://github.com/salmanhxm/session-minutes-portable/releases/latest)
 
-The project folder contains one numeric batch folder (for example `17`) with numbered subfolders (`1`, `2`, `3`, ...), plus the filling template in the project root. Template opening blocks map to numbered subfolders in document order.
+فك ضغط الملف كاملًا، ثم شغّل `SessionMinutesPortable.exe`. لا يحتاج التطبيق إلى تثبيت.
 
-The default template name is `نموذج التعبئة للمحاضر.docx`. When that file is absent, the app also accepts one regional variant whose filename begins with `نموذج التعبئة للمحاضر`; if several variants are present, keep one or rename the chosen file to the default name.
+## الاستخدام
 
-Session and closing content-control counts are discovered dynamically. Users may edit list items or add/remove controls without matching a hard-coded count; structural validation errors identify the template, paragraph, table/cell location, visible text, and actual control counts.
+1. اختر مجلد المشروع.
+2. ابدأ الفحص والمعاينة.
+3. راجع التقرير.
+4. أنشئ الملفات المطلوبة.
 
-## Privacy and safety
+يتطلب **Microsoft Word** لمراجعة الملفات الناتجة.
 
-Processing is local. The application does not upload documents, overwrite source DOCX files, or require secrets. Real case files and generated outputs are intentionally excluded from this repository.
+## الترخيص
 
-## Build
+[MIT License](LICENSE)
 
-See [BUILD_WINDOWS.md](BUILD_WINDOWS.md). Release builds require CPython 3.12 x64 and produce a ZIP plus a SHA-256 checksum.
-
-## License
-
-MIT. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+</div>
